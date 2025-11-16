@@ -408,24 +408,23 @@ app.get('/services', async (_req: Request, res: Response) => {
 
 // Appointments - criação (sem necessidade de login)
 app.post('/appointments', async (req: Request, res: Response) => {
-  const { service_id, appointment_date, appointment_time, notes, contact_name, contact_phone, contact_email } = req.body as {
+  const { service_id, appointment_date, appointment_time, notes, contact_name, contact_phone } = req.body as {
     service_id?: string;
     appointment_date?: string;
     appointment_time?: string;
     notes?: string | null;
     contact_name?: string;
     contact_phone?: string;
-    contact_email?: string;
   };
 
-  if (!service_id || !appointment_date || !appointment_time || !contact_name || !contact_phone || !contact_email) {
+  if (!service_id || !appointment_date || !appointment_time || !contact_name || !contact_phone) {
     return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
   }
 
   try {
     await pool.query(
-      'INSERT INTO appointments (id, client_id, service_id, appointment_date, appointment_time, notes, status, contact_name, contact_phone, contact_email) VALUES (UUID(), NULL, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [service_id, appointment_date, appointment_time, notes ?? null, 'pending', contact_name, contact_phone, contact_email]
+      'INSERT INTO appointments (id, client_id, service_id, appointment_date, appointment_time, notes, status, contact_name, contact_phone) VALUES (UUID(), NULL, ?, ?, ?, ?, ?, ?, ?)',
+      [service_id, appointment_date, appointment_time, notes ?? null, 'pending', contact_name, contact_phone]
     );
     res.status(201).json({ success: true });
   } catch (error) {
