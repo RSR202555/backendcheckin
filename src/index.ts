@@ -7,6 +7,8 @@ import bcrypt from 'bcryptjs';
 import multer, { FileFilterCallback } from 'multer';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import pool from './db';
 
 dotenv.config();
@@ -14,6 +16,16 @@ dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT || 587),
+  secure: Number(process.env.SMTP_PORT || 587) === 465,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASSWORD,
+  },
+});
 
 const uploadRoot = path.resolve(__dirname, '..', 'uploads');
 const evaluationsUploadDir = path.join(uploadRoot, 'evaluations');
@@ -217,6 +229,102 @@ app.post('/auth/change-password', authMiddleware, async (req: Request & { userId
   } catch (error) {
     console.error('Erro ao alterar senha', error);
     return res.status(500).json({ error: 'Erro ao alterar senha' });
+  }
+});
+
+async function sendPasswordResetEmail(email: string, token: string) {
+  const frontendUrl = process.env.FRONTEND_URL || '';
+  const resetUrl = `${frontendUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
+
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+
+  await transporter.sendMail({
+    from,
+    to: email,
+    subject: 'Redefinição de senha - Clínica Checkin',
+    text: `Você solicitou a redefinição de senha. Acesse o link a seguir para definir uma nova senha: ${resetUrl}
+
+Se você não fez esta solicitação, ignore este e-mail.`,
+    html: `<p>Você solicitou a redefinição de senha.</p>
+<p>Clique no link abaixo para definir uma nova senha:</p>
+<p><a href="${resetUrl}">${resetUrl}</a></p>
+<p>Se você não fez esta solicitação, ignore este e-mail.</p>`,
+  });
+}
+
+// Auth - solicitar reset de senha (gera token e envia e-mail)
+app.post('/auth/forgot-password', async (req: Request, res: Response) => {
+  const { email } = req.body as { email?: string };
+
+  if (!email) {
+    return res.status(400).json({ error: 'email é obrigatório' });
+  }
+
+  try {
+    const [rows] = await pool.query(
+      'SELECT id FROM profiles WHERE email = ? LIMIT 1',
+      [email]
+    );
+
+    const user = (rows as any[])[0];
+
+    // Responder 200 mesmo se não existir para não vazar se o e-mail está cadastrado
+    if (!user) {
+      return res.json({ success: true });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+
+    await pool.query(
+      'INSERT INTO password_resets (user_id, token, expires_at, used) VALUES (?, ?, ?, 0)',
+      [user.id, token, expiresAt]
+    );
+
+    await sendPasswordResetEmail(email, token);
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Erro ao solicitar redefinição de senha', error);
+    return res.status(500).json({ error: 'Erro ao solicitar redefinição de senha' });
+  }
+});
+
+// Auth - confirmar reset de senha com token
+app.post('/auth/reset-password', async (req: Request, res: Response) => {
+  const { token, new_password } = req.body as { token?: string; new_password?: string };
+
+  if (!token || !new_password) {
+    return res.status(400).json({ error: 'token e new_password são obrigatórios' });
+  }
+
+  try {
+    const [rows] = await pool.query(
+      'SELECT pr.user_id FROM password_resets pr WHERE pr.token = ? AND pr.used = 0 AND pr.expires_at > NOW() LIMIT 1',
+      [token]
+    );
+
+    const reset = (rows as any[])[0];
+    if (!reset) {
+      return res.status(400).json({ error: 'Token inválido ou expirado' });
+    }
+
+    const newHash = await bcrypt.hash(new_password, 10);
+
+    await pool.query(
+      'UPDATE profiles SET password_hash = ?, updated_at = NOW() WHERE id = ?',
+      [newHash, reset.user_id]
+    );
+
+    await pool.query(
+      'UPDATE password_resets SET used = 1, used_at = NOW() WHERE token = ?',
+      [token]
+    );
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Erro ao redefinir senha com token', error);
+    return res.status(500).json({ error: 'Erro ao redefinir senha' });
   }
 });
 
