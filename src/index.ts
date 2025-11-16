@@ -443,12 +443,12 @@ app.get('/admin/appointments', authMiddleware, requireAdmin, async (_req: Reques
         a.appointment_time,
         a.status,
         a.notes,
-        p.full_name AS client_full_name,
+        COALESCE(p.full_name, a.contact_name) AS client_full_name,
         p.email AS client_email,
-        p.phone AS client_phone,
+        COALESCE(p.phone, a.contact_phone) AS client_phone,
         s.name AS service_name
       FROM appointments a
-      JOIN profiles p ON a.client_id = p.id
+      LEFT JOIN profiles p ON a.client_id = p.id
       JOIN services s ON a.service_id = s.id
       ORDER BY a.appointment_date DESC, a.appointment_time DESC
       LIMIT 50`
