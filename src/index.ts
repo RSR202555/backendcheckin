@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import multer from 'multer';
+import multer, { FileFilterCallback } from 'multer';
 import path from 'path';
 import fs from 'fs';
 import pool from './db';
@@ -24,16 +24,16 @@ if (!fs.existsSync(evaluationsUploadDir)) {
 
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (_req, _file, cb) => {
+    destination: (_req: express.Request, _file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
       cb(null, evaluationsUploadDir);
     },
-    filename: (_req, file, cb) => {
+    filename: (_req: express.Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
       const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
       const ext = path.extname(file.originalname) || '.pdf';
       cb(null, `${uniqueSuffix}${ext}`);
     },
   }),
-  fileFilter: (_req, file, cb) => {
+  fileFilter: (_req: express.Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     if (file.mimetype !== 'application/pdf') {
       return cb(new Error('Apenas arquivos PDF são permitidos'));
     }
@@ -364,7 +364,11 @@ app.post('/admin/evaluations', async (req: Request, res: Response) => {
 });
 
 // Admin - upload evaluation PDF and create evaluation
-app.post('/admin/evaluations/upload', upload.single('file'), async (req: Request, res: Response) => {
+interface MulterRequest extends Request {
+  file?: Express.Multer.File;
+}
+
+app.post('/admin/evaluations/upload', upload.single('file'), async (req: MulterRequest, res: Response) => {
   try {
     const { client_id, professional_id, appointment_id, evaluation_date, notes } = req.body as {
       client_id?: string;
