@@ -150,6 +150,18 @@ app.post('/auth/signup', authMiddleware, requireAdmin, async (req: Request & { u
     );
 
     const profile = (rows as any[])[0];
+
+    // Vincular agendamentos existentes (sem client_id) a este novo cliente com base no e-mail de contato
+    if (profile?.id) {
+      try {
+        await pool.query(
+          'UPDATE appointments SET client_id = ? WHERE client_id IS NULL AND contact_email = ?',
+          [profile.id, email]
+        );
+      } catch (linkError) {
+        console.error('Erro ao vincular agendamentos existentes ao novo cliente', linkError);
+      }
+    }
     const token = generateToken(profile.id);
 
     res.status(201).json({ token, profile });
@@ -394,24 +406,26 @@ app.get('/services', async (_req: Request, res: Response) => {
   }
 });
 
-// Appointments - criação (cliente autenticado)
-app.post('/appointments', authMiddleware, async (req: Request & { userId?: string }, res: Response) => {
-  const client_id = req.userId;
-  const { service_id, appointment_date, appointment_time, notes } = req.body as {
+// Appointments - criação (sem necessidade de login)
+app.post('/appointments', async (req: Request, res: Response) => {
+  const { service_id, appointment_date, appointment_time, notes, contact_name, contact_phone, contact_email } = req.body as {
     service_id?: string;
     appointment_date?: string;
     appointment_time?: string;
     notes?: string | null;
+    contact_name?: string;
+    contact_phone?: string;
+    contact_email?: string;
   };
 
-  if (!client_id || !service_id || !appointment_date || !appointment_time) {
+  if (!service_id || !appointment_date || !appointment_time || !contact_name || !contact_phone || !contact_email) {
     return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
   }
 
   try {
     await pool.query(
-      'INSERT INTO appointments (id, client_id, service_id, appointment_date, appointment_time, notes, status) VALUES (UUID(), ?, ?, ?, ?, ?, ?)',
-      [client_id, service_id, appointment_date, appointment_time, notes ?? null, 'pending']
+      'INSERT INTO appointments (id, client_id, service_id, appointment_date, appointment_time, notes, status, contact_name, contact_phone, contact_email) VALUES (UUID(), NULL, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [service_id, appointment_date, appointment_time, notes ?? null, 'pending', contact_name, contact_phone, contact_email]
     );
     res.status(201).json({ success: true });
   } catch (error) {
