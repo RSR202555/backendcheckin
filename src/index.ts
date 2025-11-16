@@ -14,7 +14,12 @@ import pool from './db';
 dotenv.config();
 
 const app = express();
-app.use(cors());
+const allowedOrigin = process.env.FRONTEND_URL;
+if (allowedOrigin) {
+  app.use(cors({ origin: allowedOrigin, credentials: false }));
+} else {
+  app.use(cors());
+}
 app.use(express.json());
 
 const transporter = nodemailer.createTransport({
@@ -56,14 +61,17 @@ const upload = multer({
 app.use('/files', express.static(uploadRoot));
 
 const PORT = process.env.PORT || 4000;
-const JWT_SECRET: jwt.Secret = process.env.JWT_SECRET || 'changeme';
+if (!process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET não configurado nas variáveis de ambiente');
+}
+const JWT_SECRET: jwt.Secret = process.env.JWT_SECRET;
 
 interface JwtPayload {
   userId: string;
 }
 
 function generateToken(userId: string): string {
-  return jwt.sign({ userId } as JwtPayload, JWT_SECRET);
+  return jwt.sign({ userId } as JwtPayload, JWT_SECRET, { expiresIn: '7d' });
 }
 
 async function authMiddleware(req: Request & { userId?: string }, res: Response, next: NextFunction) {
@@ -83,12 +91,30 @@ async function authMiddleware(req: Request & { userId?: string }, res: Response,
   }
 }
 
+async function requireAdmin(req: Request & { userId?: string }, res: Response, next: NextFunction) {
+  if (!req.userId) {
+    return res.status(401).json({ error: 'Não autenticado' });
+  }
+
+  try {
+    const [rows] = await pool.query('SELECT role FROM profiles WHERE id = ? LIMIT 1', [req.userId]);
+    const user = (rows as any[])[0];
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ error: 'Acesso negado' });
+    }
+    next();
+  } catch (error) {
+    console.error('Erro ao verificar permissão de admin', error);
+    return res.status(500).json({ error: 'Erro de autorização' });
+  }
+}
+
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 
-// Auth - signup (registro)
-app.post('/auth/signup', async (req: Request, res: Response) => {
+// Auth - signup (registro) - apenas administradores podem cadastrar novos usuários
+app.post('/auth/signup', authMiddleware, requireAdmin, async (req: Request & { userId?: string }, res: Response) => {
   const { email, password, full_name, phone } = req.body as {
     email?: string;
     password?: string;
@@ -368,9 +394,15 @@ app.get('/services', async (_req: Request, res: Response) => {
   }
 });
 
-// Appointments
-app.post('/appointments', async (req: Request, res: Response) => {
-  const { client_id, service_id, appointment_date, appointment_time, notes } = req.body;
+// Appointments - criação (cliente autenticado)
+app.post('/appointments', authMiddleware, async (req: Request & { userId?: string }, res: Response) => {
+  const client_id = req.userId;
+  const { service_id, appointment_date, appointment_time, notes } = req.body as {
+    service_id?: string;
+    appointment_date?: string;
+    appointment_time?: string;
+    notes?: string | null;
+  };
 
   if (!client_id || !service_id || !appointment_date || !appointment_time) {
     return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
@@ -389,7 +421,7 @@ app.post('/appointments', async (req: Request, res: Response) => {
 });
 
 // Admin - appointments with details
-app.get('/admin/appointments', async (_req: Request, res: Response) => {
+app.get('/admin/appointments', authMiddleware, requireAdmin, async (_req: Request, res: Response) => {
   try {
     const [rows] = await pool.query(
       `SELECT 
@@ -416,7 +448,7 @@ app.get('/admin/appointments', async (_req: Request, res: Response) => {
 });
 
 // Admin - clients
-app.get('/admin/clients', async (_req: Request, res: Response) => {
+app.get('/admin/clients', authMiddleware, requireAdmin, async (_req: Request, res: Response) => {
   try {
     const [rows] = await pool.query(
       `SELECT id, full_name, email, phone, created_at
@@ -432,7 +464,7 @@ app.get('/admin/clients', async (_req: Request, res: Response) => {
 });
 
 // Admin - update appointment status
-app.patch('/admin/appointments/:id/status', async (req: Request, res: Response) => {
+app.patch('/admin/appointments/:id/status', authMiddleware, requireAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status } = req.body as { status?: string };
 
@@ -450,7 +482,7 @@ app.patch('/admin/appointments/:id/status', async (req: Request, res: Response) 
 });
 
 // Admin - create evaluation
-app.post('/admin/evaluations', async (req: Request, res: Response) => {
+app.post('/admin/evaluations', authMiddleware, requireAdmin, async (req: Request, res: Response) => {
   const { client_id, professional_id, appointment_id, evaluation_date, pdf_url, notes } = req.body;
 
   const normalizedAppointmentId = appointment_id === '' || appointment_id === undefined ? null : appointment_id;
@@ -476,7 +508,7 @@ interface MulterRequest extends Request {
   file?: Express.Multer.File;
 }
 
-app.post('/admin/evaluations/upload', upload.single('file'), async (req: MulterRequest, res: Response) => {
+app.post('/admin/evaluations/upload', authMiddleware, requireAdmin, upload.single('file'), async (req: MulterRequest, res: Response) => {
   try {
     const { client_id, professional_id, appointment_id, evaluation_date, notes } = req.body as {
       client_id?: string;
@@ -511,9 +543,13 @@ app.post('/admin/evaluations/upload', upload.single('file'), async (req: MulterR
   }
 });
 
-// Client - appointments for a given client
-app.get('/client/:clientId/appointments', async (req: Request, res: Response) => {
+// Client - appointments for a given client (somente o próprio usuário)
+app.get('/client/:clientId/appointments', authMiddleware, async (req: Request & { userId?: string }, res: Response) => {
   const { clientId } = req.params;
+
+  if (!req.userId || req.userId !== clientId) {
+    return res.status(403).json({ error: 'Acesso negado' });
+  }
 
   try {
     const [rows] = await pool.query(
@@ -538,9 +574,13 @@ app.get('/client/:clientId/appointments', async (req: Request, res: Response) =>
   }
 });
 
-// Client - evaluations for a given client
-app.get('/client/:clientId/evaluations', async (req: Request, res: Response) => {
+// Client - evaluations for a given client (somente o próprio usuário)
+app.get('/client/:clientId/evaluations', authMiddleware, async (req: Request & { userId?: string }, res: Response) => {
   const { clientId } = req.params;
+
+  if (!req.userId || req.userId !== clientId) {
+    return res.status(403).json({ error: 'Acesso negado' });
+  }
 
   try {
     const [rows] = await pool.query(
@@ -564,7 +604,7 @@ app.get('/client/:clientId/evaluations', async (req: Request, res: Response) => 
 });
 
 // Admin - latest evaluation (for notifications)
-app.get('/admin/evaluations/latest', async (_req: Request, res: Response) => {
+app.get('/admin/evaluations/latest', authMiddleware, requireAdmin, async (_req: Request, res: Response) => {
   try {
     const [rows] = await pool.query(
       `SELECT 
