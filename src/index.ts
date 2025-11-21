@@ -366,6 +366,49 @@ app.post('/auth/reset-password', async (req: Request, res: Response) => {
   }
 });
 
+// Auth - bootstrap admin (apenas quando nao existe nenhum admin)
+app.post('/auth/bootstrap-admin', async (req: Request, res: Response) => {
+  const { email, password, full_name, phone } = req.body as {
+    email?: string;
+    password?: string;
+    full_name?: string;
+    phone?: string;
+  };
+
+  if (!email || !password || !full_name) {
+    return res.status(400).json({ error: 'email, password e full_name são obrigatórios' });
+  }
+
+  try {
+    // verifica se ja existe algum admin
+    const [admins] = await pool.query('SELECT id FROM profiles WHERE role = "admin" LIMIT 1');
+    if ((admins as any[]).length > 0) {
+      return res.status(409).json({ error: 'Já existe um administrador cadastrado' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await pool.query(
+      `INSERT INTO profiles (id, email, full_name, phone, role, password_hash)
+       VALUES (UUID(), ?, ?, ?, 'admin', ?)`,
+      [email, full_name, phone ?? null, passwordHash]
+    );
+
+    const [rows] = await pool.query(
+      'SELECT id, email, full_name, phone, role, created_at, updated_at FROM profiles WHERE email = ? LIMIT 1',
+      [email]
+    );
+
+    const profile = (rows as any[])[0];
+    const token = generateToken(profile.id);
+
+    return res.status(201).json({ token, profile });
+  } catch (error) {
+    console.error('Erro no bootstrap-admin', error);
+    return res.status(500).json({ error: 'Erro ao criar administrador inicial' });
+  }
+});
+
 // Profile - update dados básicos
 app.patch('/profile', authMiddleware, async (req: Request & { userId?: string }, res: Response) => {
   if (!req.userId) {
