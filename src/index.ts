@@ -422,6 +422,15 @@ app.post('/appointments', async (req: Request, res: Response) => {
   }
 
   try {
+    const [existing] = await pool.query(
+      'SELECT id FROM appointments WHERE appointment_date = ? AND appointment_time = ? LIMIT 1',
+      [appointment_date, appointment_time]
+    );
+
+    if ((existing as any[]).length > 0) {
+      return res.status(409).json({ error: 'Já existe um agendamento para esta data e horário.' });
+    }
+
     await pool.query(
       'INSERT INTO appointments (id, client_id, service_id, appointment_date, appointment_time, notes, status, contact_name, contact_phone) VALUES (UUID(), NULL, ?, ?, ?, ?, ?, ?, ?)',
       [service_id, appointment_date, appointment_time, notes ?? null, 'pending', contact_name, contact_phone]
@@ -430,6 +439,28 @@ app.post('/appointments', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error creating appointment', error);
     res.status(500).json({ error: 'Erro ao criar agendamento' });
+  }
+});
+
+// Appointments - horários indisponíveis para uma data
+app.get('/appointments/unavailable', async (req: Request, res: Response) => {
+  const { date } = req.query as { date?: string };
+
+  if (!date) {
+    return res.status(400).json({ error: 'Parâmetro date é obrigatório (YYYY-MM-DD)' });
+  }
+
+  try {
+    const [rows] = await pool.query(
+      'SELECT appointment_time FROM appointments WHERE appointment_date = ? AND status <> "cancelled"',
+      [date]
+    );
+
+    const times = (rows as any[]).map((r) => r.appointment_time);
+    res.json(times);
+  } catch (error) {
+    console.error('Error fetching unavailable appointment times', error);
+    res.status(500).json({ error: 'Erro ao buscar horários indisponíveis' });
   }
 });
 
@@ -613,6 +644,33 @@ app.get('/client/:clientId/evaluations', authMiddleware, async (req: Request & {
   } catch (error) {
     console.error('Error fetching client evaluations', error);
     res.status(500).json({ error: 'Erro ao buscar avaliações do cliente' });
+  }
+});
+
+// Admin - evaluations history for a given client
+app.get('/admin/clients/:clientId/evaluations', authMiddleware, requireAdmin, async (req: Request, res: Response) => {
+  const { clientId } = req.params;
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT 
+        e.id,
+        e.client_id,
+        e.professional_id,
+        e.evaluation_date,
+        e.pdf_url,
+        e.notes,
+        p.full_name AS professional_full_name
+      FROM evaluations e
+      JOIN profiles p ON e.professional_id = p.id
+      WHERE e.client_id = ?
+      ORDER BY e.evaluation_date ASC`,
+      [clientId]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching admin client evaluations', error);
+    res.status(500).json({ error: 'Erro ao buscar avaliações do cliente para o admin' });
   }
 });
 
