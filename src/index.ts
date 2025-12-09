@@ -674,6 +674,25 @@ app.get('/admin/clients/:clientId/evaluations', authMiddleware, requireAdmin, as
   }
 });
 
+// Admin - delete evaluation
+app.delete('/admin/evaluations/:id', authMiddleware, requireAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    const [result] = await pool.query('DELETE FROM evaluations WHERE id = ?', [id]);
+    const info = result as any;
+
+    if (!info.affectedRows) {
+      return res.status(404).json({ error: 'Avaliação não encontrada' });
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting evaluation', error);
+    return res.status(500).json({ error: 'Erro ao excluir avaliação' });
+  }
+});
+
 // Admin - latest evaluation (for notifications)
 app.get('/admin/evaluations/latest', authMiddleware, requireAdmin, async (_req: Request, res: Response) => {
   try {
