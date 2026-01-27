@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS services;
+
+CREATE TABLE services (
+  id UUID NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(255) NOT NULL,
+  description VARCHAR(1000) NOT NULL DEFAULT '',
+  duration_minutes INTEGER NOT NULL DEFAULT 60,
+  price NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
