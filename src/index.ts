@@ -110,6 +110,10 @@ async function requireAdmin(req: Request & { userId?: string }, res: Response, n
   }
 }
 
+app.get('/', (_req: Request, res: Response) => {
+  res.json({ status: 'ok' });
+});
+
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
