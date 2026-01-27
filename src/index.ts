@@ -60,7 +60,8 @@ const upload = multer({
 
 app.use('/files', express.static(uploadRoot));
 
-const PORT = process.env.PORT || 4000;
+const PORT = Number(process.env.PORT || 4000);
+const HOST = process.env.HOST || '0.0.0.0';
 if (!process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET não configurado nas variáveis de ambiente');
 }
@@ -845,6 +846,6 @@ app.get('/admin/evaluations/latest', authMiddleware, requireAdmin, async (_req: 
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`API running on http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`API running on http://${HOST}:${PORT}`);
 });
