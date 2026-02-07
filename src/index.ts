@@ -10,6 +10,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import pool from './db';
+import { uploadEvaluationWithBlob } from './upload-blob';
 
 dotenv.config();
 
@@ -39,17 +40,12 @@ if (!fs.existsSync(evaluationsUploadDir)) {
   fs.mkdirSync(evaluationsUploadDir, { recursive: true });
 }
 
+// Multer com memoryStorage para Vercel Blob
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req: express.Request, _file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
-      cb(null, evaluationsUploadDir);
-    },
-    filename: (_req: express.Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
-      const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      const ext = path.extname(file.originalname) || '.pdf';
-      cb(null, `${uniqueSuffix}${ext}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB
+  },
   fileFilter: (_req: express.Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     if (file.mimetype !== 'application/pdf') {
       return cb(new Error('Apenas arquivos PDF são permitidos'));
@@ -679,40 +675,8 @@ type MulterRequest = Request & {
   body: any;
 };
 
-app.post('/admin/evaluations/upload', authMiddleware, requireAdmin, upload.single('file'), async (req: MulterRequest, res: Response) => {
-  try {
-    const { client_id, professional_id, appointment_id, evaluation_date, notes } = req.body as {
-      client_id?: string;
-      professional_id?: string;
-      appointment_id?: string;
-      evaluation_date?: string;
-      notes?: string;
-    };
-
-    const normalizedAppointmentId = appointment_id === '' || appointment_id === undefined ? null : appointment_id;
-
-    if (!client_id || !professional_id || !evaluation_date) {
-      return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ error: 'Arquivo PDF é obrigatório' });
-    }
-
-    const relativePath = path.join('evaluations', req.file.filename).replace(/\\/g, '/');
-    const publicUrl = `/files/${relativePath}`;
-
-    await pool.query(
-      'INSERT INTO evaluations (id, client_id, professional_id, appointment_id, evaluation_date, pdf_url, notes) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)',
-      [client_id, professional_id, normalizedAppointmentId, evaluation_date, publicUrl, notes ?? null]
-    );
-
-    res.status(201).json({ success: true, pdf_url: publicUrl });
-  } catch (error) {
-    console.error('Error uploading evaluation PDF', error);
-    res.status(500).json({ error: 'Erro ao fazer upload da avaliação' });
-  }
-});
+// Admin - upload evaluation PDF usando Vercel Blob
+app.post('/admin/evaluations/upload', authMiddleware, requireAdmin, upload.single('file'), uploadEvaluationWithBlob);
 
 // Client - appointments for a given client (somente o próprio usuário)
 app.get('/client/:clientId/appointments', authMiddleware, async (req: Request & { userId?: string }, res: Response) => {
