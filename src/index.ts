@@ -850,6 +850,12 @@ app.get('/admin/evaluations/latest', authMiddleware, requireAdmin, async (_req: 
   }
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`API running on http://${HOST}:${PORT}`);
-});
+// Exportar app para Vercel serverless
+export default app;
+
+// Listen apenas em desenvolvimento local (não na Vercel)
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, HOST, () => {
+    console.log(`API running on http://${HOST}:${PORT}`);
+  });
+}
