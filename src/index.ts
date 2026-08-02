@@ -407,6 +407,10 @@ app.get('/services', async (_req: Request, res: Response) => {
   }
 });
 
+function getTodayInBrazil(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+}
+
 // Appointments - criação (sem necessidade de login)
 app.post('/appointments', async (req: Request, res: Response) => {
   const { service_id, appointment_date, appointment_time, notes, contact_name, contact_phone } = req.body as {
@@ -420,6 +424,11 @@ app.post('/appointments', async (req: Request, res: Response) => {
 
   if (!service_id || !appointment_date || !appointment_time || !contact_name || !contact_phone) {
     return res.status(400).json({ error: 'Campos obrigatórios ausentes' });
+  }
+
+  const todayStr = getTodayInBrazil();
+  if (appointment_date <= todayStr) {
+    return res.status(400).json({ error: 'Não é possível agendar para o mesmo dia ou datas passadas. Por favor, selecione uma data a partir de amanhã.' });
   }
 
   try {
@@ -466,6 +475,11 @@ app.get('/appointments/unavailable', async (req: Request, res: Response) => {
       '07:00', '08:00', '09:00', '10:00', '11:00',
       '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'
     ];
+
+    const todayStr = getTodayInBrazil();
+    if (date <= todayStr) {
+      return res.json(timeSlots);
+    }
 
     const [dayBlockRows] = await pool.query(
       'SELECT id FROM schedule_blocks WHERE block_date = $1 AND block_time IS NULL LIMIT 1',
